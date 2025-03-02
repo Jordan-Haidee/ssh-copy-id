@@ -1,5 +1,5 @@
 # ssh-copy-id-windows
-A simple implementation of ssh-copy-id in Rust on Windows
+A simple implementation of [ssh-copy-id](https://www.ssh.com/academy/ssh/copy-id) in Rust on Windows
 
 
 ## Install
