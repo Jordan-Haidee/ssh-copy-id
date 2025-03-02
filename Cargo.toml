@@ -1,9 +1,20 @@
 [package]
 name = "ssh-copy-id"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "A simple implementation of ssh-copy-id in Rust on Windows"
 
 [dependencies]
-dirs = "6.0.0"
-clap = "4.5.31"
+clap = { version = "4.5.31", features = ["derive"] }
 ssh2 = "0.9.5"
+shellexpand = "3.1.0"
+
+[[bin]]
+name = "sci"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
