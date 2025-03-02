@@ -8,7 +8,8 @@ use std::process::exit;
 #[derive(Parser, Debug)]
 #[command(
     name = "ssh-copy-id",
-    about = "A simple implementation of ssh-copy-id in Rust on Windows"
+    about = "A simple implementation of ssh-copy-id in Rust on Windows", 
+    version
 )]
 struct Args {
     /// Remote server address in the format of user@host:port
