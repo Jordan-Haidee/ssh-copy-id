@@ -1,4 +1,4 @@
-# ssh-copy-id-windows
+# ssh-copy-id
 A cross-platform implementation of [ssh-copy-id](https://www.ssh.com/academy/ssh/copy-id) in Rust.
 
 
