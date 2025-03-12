@@ -1,6 +1,6 @@
 [package]
 name = "ssh-copy-id"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A simple implementation of ssh-copy-id in Rust on Windows"
 

@@ -1,14 +1,15 @@
 use clap::Parser;
 use ssh2::Session;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::path::Path;
 use std::process::exit;
 
 // define command line arguments
 #[derive(Parser, Debug)]
 #[command(
     name = "ssh-copy-id",
-    about = "A simple implementation of ssh-copy-id in Rust on Windows", 
+    about = "A simple implementation of ssh-copy-id in Rust on Windows",
     version
 )]
 struct Args {
@@ -36,6 +37,8 @@ struct Args {
     #[clap(short = 'i', default_value = "~/.ssh/id_rsa.pub")]
     pubkey: String,
 }
+
+type Error = Box<dyn std::error::Error>;
 
 fn parse_address(input: &str) -> Result<(String, String, Option<String>), String> {
     //  split user and host/port part
@@ -81,7 +84,7 @@ fn create_ssh_session(
     host: &str,
     port: &str,
     password: &str,
-) -> Result<Session, Box<dyn std::error::Error>> {
+) -> Result<Session, Error> {
     // 1. create tcp connection
     let addr = format!("{}:{}", host, port);
     let tcp = TcpStream::connect(addr)?;
@@ -103,42 +106,45 @@ fn create_ssh_session(
     Ok(session)
 }
 
-fn read_auth_keys(session: &Session) -> Result<(String, String), Box<dyn std::error::Error>> {
-    let remote_home_dir = run_remote_command(&session, "pwd")?
-        .0
-        .trim_end()
-        .to_string();
-    let remote_authorized_path = format!("{}/.ssh/authorized_keys", remote_home_dir);
-    if run_remote_command(session, &format!("ls {remote_authorized_path}"))?.1 != 0 {
-        run_remote_command(session, &format!("echo > {remote_authorized_path}"))?;
+fn read_auth_keys(session: &Session) -> Result<String, Error> {
+    let p = Path::new(".ssh/authorized_keys");
+    if let Ok((mut remote_file, _)) = session.scp_recv(p) {
+        let mut contents = Vec::new();
+        remote_file.read_to_end(&mut contents)?;
+
+        // Close the channel and wait for the whole content to be tranferred
+        remote_file.send_eof()?;
+        remote_file.wait_eof()?;
+        remote_file.close()?;
+        remote_file.wait_close()?;
+        return Ok(String::from_utf8(contents)?);
+    } else {
+        Ok(String::new())
     }
-    let authorized_keys =
-        run_remote_command(&session, &format!("cat {}", remote_authorized_path))?.0;
-    Ok((authorized_keys, remote_authorized_path))
 }
 
-fn read_local_pubkey(pubkey_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn write_auth_keys(session: &Session, pubkey: &str) -> Result<(), Error> {
+    let p = Path::new(".ssh/authorized_keys");
+    let s = pubkey.as_bytes();
+    let mut remote_file = session.scp_send(p, 0o644, s.len() as u64, None)?;
+    let res = remote_file.write(s);
+
+    // Close the channel and wait for the whole content to be tranferred
+    remote_file.send_eof()?;
+    remote_file.wait_eof()?;
+    remote_file.close()?;
+    remote_file.wait_close()?;
+    res.map(|_| ()).map_err(|e| e.into())
+}
+
+fn read_local_pubkey(pubkey_path: &str) -> Result<String, Error> {
     let p = shellexpand::tilde(pubkey_path);
+    dbg!(&p);
     let pubkey_string = std::fs::read_to_string(p.as_ref())?;
     Ok(pubkey_string)
 }
 
-fn run_remote_command(
-    session: &Session,
-    command: &str,
-) -> Result<(String, i32), Box<dyn std::error::Error>> {
-    // create new channel for every command
-    let mut channel = session.channel_session()?;
-    channel.exec(command)?;
-
-    let mut output = String::new();
-    channel.read_to_string(&mut output)?;
-    let exit_status = channel.exit_status()?;
-    channel.close()?;
-    Ok((output, exit_status))
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Error> {
     // parse command line arguments
     let (user, host, port, password, pubkey) = parse_args();
 
@@ -146,22 +152,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session = create_ssh_session(&user, &host, &port, &password)?;
 
     // read authorized keys
-    let (remote_authorized_keys, remote_authorized_path) = read_auth_keys(&session)?;
+    let mut remote_authorized_keys = read_auth_keys(&session)?;
 
     // read local public key
     let pubkey = read_local_pubkey(&pubkey)?;
 
     // copy public key to remote authorized keys
     if !remote_authorized_keys.contains(&pubkey) {
-        let exit_code = run_remote_command(
-            &session,
-            &format!("echo \'{pubkey}\' >> {}", remote_authorized_path),
-        )?
-        .1;
-        if exit_code == 0 {
-            println!("public key copied successfully");
-        } else {
-            eprintln!("failed to copy public key");
+        remote_authorized_keys.push_str(&pubkey);
+        match write_auth_keys(&session, &remote_authorized_keys) {
+            Ok(_) => {
+                println!("public key copied successfully");
+            }
+            Err(e) => {
+                eprintln!("failed to copy public key: {}", e);
+            }
         }
     } else {
         println!("public key already exists, so nothing to do");
